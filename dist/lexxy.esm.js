@@ -5298,7 +5298,7 @@ class ActionTextAttachmentUploadNode extends ActionTextAttachmentNode {
 
     // Bridge-managed uploads (uploadUrl is null) don't have file data to show
     // an image preview, so always show the file icon during upload.
-    const canPreviewFile = this.isPreviewableAttachment && this.uploadUrl != null;
+    const canPreviewFile = this.isPreviewableAttachment && this.uploadUrl != null && this.file != null;
     const figure = this.createAttachmentFigure(canPreviewFile);
 
     if (canPreviewFile) {
@@ -5392,6 +5392,7 @@ class ActionTextAttachmentUploadNode extends ActionTextAttachmentNode {
 
   async #startUploadIfNeeded() {
     if (this.#uploadStarted) return
+    if (!this.file) return // a collaborative peer rendering the placeholder has no local File
     if (!this.uploadUrl) return // Bridge-managed upload — skip DirectUpload
 
     this.#setUploadStarted();
