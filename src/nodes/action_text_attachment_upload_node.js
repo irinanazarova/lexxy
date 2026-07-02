@@ -25,7 +25,12 @@ export class ActionTextAttachmentUploadNode extends ActionTextAttachmentNode {
   constructor(node = {}, key) {
     const { file, uploadUrl, blobUrlTemplate, progress, width, height, uploadError, fileName, contentType } = node
     super({ ...node, contentType: file?.type ?? contentType }, key)
-    this.file = file ?? null
+    // Non-enumerable: the File handle drives the local upload, it is not node
+    // data. Enumerable, it enters collaborative property sync, and a File
+    // cannot round-trip through Yjs attribute encoding -- peers then fail to
+    // pair the node, and its eventual removal (the finalize replace) silently
+    // never applies, leaving a stuck placeholder next to the final attachment.
+    Object.defineProperty(this, "file", { value: file ?? null, writable: true, configurable: true, enumerable: false })
     this.fileName = file?.name ?? fileName
     this.uploadUrl = uploadUrl
     this.blobUrlTemplate = blobUrlTemplate
