@@ -2173,7 +2173,11 @@ class ActionTextAttachmentNode extends DecoratorNode {
     this.height = height;
     this.uploadError = uploadError;
 
-    this.editor = $getEditor();
+    // Non-enumerable: this is a backreference for rendering, not node data.
+    // Enumerable, it enters collaborative property sync (@lexical/yjs snapshots
+    // Object.entries), where an editor instance becomes a nested sub-document
+    // per attachment and re-integrates on every sync. Clones re-derive it here.
+    Object.defineProperty(this, "editor", { value: $getEditor(), writable: true, configurable: true, enumerable: false });
   }
 
   createDOM() {
