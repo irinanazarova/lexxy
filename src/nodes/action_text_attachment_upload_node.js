@@ -22,10 +22,15 @@ export class ActionTextAttachmentUploadNode extends ActionTextAttachmentNode {
     return null
   }
 
-  constructor(node, key) {
+  constructor(node = {}, key) {
     const { file, uploadUrl, blobUrlTemplate, progress, width, height, uploadError, fileName, contentType } = node
     super({ ...node, contentType: file?.type ?? contentType }, key)
-    this.file = file ?? null
+    // Non-enumerable: the File handle drives the local upload, it is not node
+    // data. Enumerable, it enters collaborative property sync (@lexical/yjs
+    // snapshots Object.entries(node)), and a File cannot round-trip through
+    // Yjs attribute encoding -- peers then fail to pair the node, and its
+    // eventual removal (the finalize replace) silently never applies.
+    Object.defineProperty(this, "file", { value: file ?? null, writable: true, configurable: true, enumerable: false })
     this.fileName = file?.name ?? fileName
     this.uploadUrl = uploadUrl
     this.blobUrlTemplate = blobUrlTemplate
@@ -45,7 +50,7 @@ export class ActionTextAttachmentUploadNode extends ActionTextAttachmentNode {
 
     // Bridge-managed uploads (uploadUrl is null) don't have file data to show
     // an image preview, so always show the file icon during upload.
-    const canPreviewFile = this.isPreviewableAttachment && this.uploadUrl != null
+    const canPreviewFile = this.isPreviewableAttachment && this.uploadUrl != null && this.file != null
     const figure = this.createAttachmentFigure(canPreviewFile)
 
     if (canPreviewFile) {
@@ -139,6 +144,7 @@ export class ActionTextAttachmentUploadNode extends ActionTextAttachmentNode {
 
   async #startUploadIfNeeded() {
     if (this.#uploadStarted) return
+    if (!this.file) return // a collaborative peer rendering the placeholder has no local File
     if (!this.uploadUrl) return // Bridge-managed upload — skip DirectUpload
 
     this.#setUploadStarted()

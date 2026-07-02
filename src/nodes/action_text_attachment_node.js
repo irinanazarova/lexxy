@@ -84,7 +84,7 @@ export class ActionTextAttachmentNode extends DecoratorNode {
     return Lexxy.global.get("attachmentTagName")
   }
 
-  constructor({ tagName, sgid, src, previewSrc, previewable, previewStatusUrl, pendingPreview, altText, caption, contentType, fileName, fileSize, width, height, uploadError }, key) {
+  constructor({ tagName, sgid, src, previewSrc, previewable, previewStatusUrl, pendingPreview, altText, caption, contentType, fileName, fileSize, width, height, uploadError } = {}, key) {
     super(key)
 
     this.tagName = tagName || ActionTextAttachmentNode.TAG_NAME
@@ -103,7 +103,11 @@ export class ActionTextAttachmentNode extends DecoratorNode {
     this.height = height
     this.uploadError = uploadError
 
-    this.editor = $getEditor()
+    // Non-enumerable: this is a backreference for rendering, not node data.
+    // Enumerable, it enters collaborative property sync, where an editor
+    // instance becomes a nested Yjs sub-document per attachment and
+    // re-integrates on every sync. Clones re-derive it here.
+    Object.defineProperty(this, "editor", { value: $getEditor(), writable: true, configurable: true, enumerable: false })
   }
 
   createDOM() {
