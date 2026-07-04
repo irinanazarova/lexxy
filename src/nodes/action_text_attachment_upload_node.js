@@ -22,7 +22,7 @@ export class ActionTextAttachmentUploadNode extends ActionTextAttachmentNode {
     return null
   }
 
-  constructor(node, key) {
+  constructor(node = {}, key) {
     const { file, uploadUrl, blobUrlTemplate, progress, width, height, uploadError, fileName, contentType } = node
     super({ ...node, contentType: file?.type ?? contentType }, key)
     this.file = file ?? null
