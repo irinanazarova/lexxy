@@ -2,7 +2,7 @@ export { highlightCode, highlightElement } from './lexxy_helpers.esm.js';
 import DOMPurify from 'dompurify';
 import { getStyleObjectFromCSS, getCSSFromStyleObject, $getSelectionStyleValueForProperty, $ensureForwardRangeSelection, $isAtNodeEnd, $patchStyleText, $setBlocksType, $forEachSelectedTextNode } from '@lexical/selection';
 import { SKIP_DOM_SELECTION_TAG, CAN_UNDO_COMMAND, COMMAND_PRIORITY_LOW, CAN_REDO_COMMAND, $getSelection, $isRangeSelection, DecoratorNode, $createTextNode, $getRoot, $caretFromPoint, $setSelectionFromCaretRange, $getCaretRange, $normalizeCaret, $getChildCaret, $getCaretInDirection, $isParagraphNode, $isLineBreakNode, $createParagraphNode, $isElementNode, $isRootOrShadowRoot, $isRootNode, $createNodeSelection, $isDecoratorNode, $isTextNode, $getSiblingCaret, $rewindSiblingCaret, $splitAtPointCaretNext, $normalizeSelection__EXPERIMENTAL, $isChildCaret, $isTextPointCaret, $isExtendableTextPointCaret, $isSiblingCaret, $getCommonAncestor, $findMatchingParent, TextNode, createCommand, defineExtension, COMMAND_PRIORITY_EDITOR, $getEditor, $getNodeByKey, HISTORY_MERGE_TAG, SKIP_SCROLL_INTO_VIEW_TAG, $cloneWithProperties, $getNearestRootOrShadowRoot, $createRangeSelection, $setSelection, createState, COMMAND_PRIORITY_NORMAL, $getState, $setState, $hasUpdateTag, PASTE_TAG, FORMAT_TEXT_COMMAND, UNDO_COMMAND, REDO_COMMAND, KEY_ARROW_RIGHT_COMMAND, KEY_TAB_COMMAND, INSERT_LINE_BREAK_COMMAND, COMMAND_PRIORITY_HIGH, INSERT_PARAGRAPH_COMMAND, OUTDENT_CONTENT_COMMAND, INDENT_CONTENT_COMMAND, $isNodeSelection, KEY_ARROW_LEFT_COMMAND, KEY_ARROW_UP_COMMAND, KEY_ARROW_DOWN_COMMAND, DELETE_CHARACTER_COMMAND, SELECTION_CHANGE_COMMAND, CLICK_COMMAND, isDOMNode, $getNearestNodeFromDOMNode, $addUpdateTag, ElementNode, $splitNode, $getChildCaretAtIndex, $createLineBreakNode, SELECTION_INSERT_CLIPBOARD_NODES_COMMAND, PASTE_COMMAND, $onUpdate, ParagraphNode, RootNode, DRAGSTART_COMMAND, DROP_COMMAND, mergeRegister as mergeRegister$1, $createRangeSelectionFromDom, CLEAR_HISTORY_COMMAND, KEY_ENTER_COMMAND, COMMAND_PRIORITY_CRITICAL, KEY_SPACE_COMMAND, INPUT_COMMAND, KEY_BACKSPACE_COMMAND, KEY_DOWN_COMMAND } from 'lexical';
-import { LinkNode, $createAutoLinkNode, $toggleLink, $createLinkNode, $isLinkNode, AutoLinkNode } from '@lexical/link';
+import { LinkNode, $createAutoLinkNode, $toggleLink, $createLinkNode, $isLinkNode, registerAutoLink, createLinkMatcherWithRegExp, AutoLinkNode } from '@lexical/link';
 import { buildEditorFromExtensions } from '@lexical/extension';
 import { ListNode, ListItemNode, $getListDepth, $isListNode, $isListItemNode, INSERT_UNORDERED_LIST_COMMAND, INSERT_ORDERED_LIST_COMMAND, $createListNode, $createListItemNode, registerList } from '@lexical/list';
 import { $getNearestNodeOfType, $wrapNodeInElement, $lastToFirstIterator, $descendantsMatching, mergeRegister, $insertNodeToNearestRoot, $insertFirst, $unwrapAndFilterDescendants, $firstToLastIterator, $getNearestBlockElementAncestorOrThrow, IS_APPLE } from '@lexical/utils';
@@ -1142,6 +1142,77 @@ class HighlightDropdown extends ToolbarDropdown {
   }
 }
 
+function dasherize(value) {
+  return value.replace(/([A-Z])/g, (_, char) => `-${char.toLowerCase()}`)
+}
+
+// Curated set of TLDs we treat as bare-domain links (no scheme). Deliberately
+// narrow: it leaves out code/file-ish suffixes (rb, ru, js, py, go, rs, sh, ex)
+// so tokens like "Node.js" or "config.ru" stay plain text.
+const AUTOLINK_TLDS = [
+  "com", "org", "net", "io", "dev", "app", "co", "ai", "info", "biz",
+  "xyz", "tech", "cloud", "gov", "edu", "me", "tv", "blog", "site",
+  "online", "store", "page", "wiki", "news",
+  "uk", "de", "fr", "nl", "eu", "us", "ca", "au", "jp", "in", "br",
+  "es", "it", "se", "no", "fi", "dk", "ch", "at"
+];
+
+const BARE_DOMAIN = `(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\\.)+(?:${AUTOLINK_TLDS.join("|")})(?![a-z0-9-])`;
+
+// A whole string that is a linkable URL: explicit scheme, www. host, or a bare
+// host whose TLD is curated. Used for paste.
+const AUTOLINKABLE_URL = new RegExp(`^(?:[a-z0-9]+://|www\\.)[^\\s]+$|^${BARE_DOMAIN}(?:[/?#][^\\s]*)?$`, "i");
+
+// A URL found anywhere in a run of text, for as-you-type autolinking.
+const AUTOLINK_URL_REGEXP = new RegExp(`https?://[^\\s]+|www\\.[^\\s]+|${BARE_DOMAIN}(?:[/?#][^\\s]*)?`, "i");
+
+function isAutolinkableURL(string) {
+  return AUTOLINKABLE_URL.test(string)
+}
+
+// Guesses a scheme for a schemeless URL so a bare host like
+// "ruby.evilmartians.com" becomes "https://ruby.evilmartians.com". Leaves
+// existing schemes, protocol-relative URLs, mailto:/tel:, paths and anchors alone.
+function normalizeUrl(string) {
+  const trimmed = string.trim();
+  if (!trimmed) return trimmed
+  if (/^\/\//.test(trimmed)) return `https:${trimmed}`
+  if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) return trimmed
+  if (/^[/#?]/.test(trimmed)) return trimmed
+  return `https://${trimmed}`
+}
+
+function normalizeFilteredText(string) {
+  return string
+    .toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Remove diacritics
+}
+
+function filterMatchPosition(text, potentialMatch) {
+  const normalizedText = normalizeFilteredText(text);
+  const normalizedMatch = normalizeFilteredText(potentialMatch);
+
+  if (!normalizedMatch) return 0
+
+  const match = normalizedText.match(new RegExp(`(?<![\\p{L}\\p{N}])${escapeForRegExp(normalizedMatch)}`, "u"));
+  return match ? match.index : -1
+}
+
+function upcaseFirst(string) {
+  return string.charAt(0).toUpperCase() + string.slice(1)
+}
+
+function escapeForRegExp(string) {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
+// Parses a value that may arrive as a boolean or as a string (e.g. from DOM
+// getAttribute) into a proper boolean. Ensures "false" doesn't evaluate as truthy.
+function parseBoolean(value) {
+  if (typeof value === "string") return value === "true"
+  return Boolean(value)
+}
+
 class LinkDropdown extends ToolbarDropdown {
   editorReady() {
     this.input = this.panel.querySelector("input");
@@ -1179,6 +1250,10 @@ class LinkDropdown extends ToolbarDropdown {
   }
 
   #handleLink = () => {
+    // Guess a scheme for bare hosts ("ruby.evilmartians.com") so the native
+    // type="url" validity check passes and the link gets an https:// href.
+    if (this.input.value.trim()) this.input.value = normalizeUrl(this.input.value);
+
     if (!this.input.checkValidity()) {
       this.input.reportValidity();
       return
@@ -1440,45 +1515,6 @@ class CustomActionTextAttachmentNode extends DecoratorNode {
 
 function $isCustomActionTextAttachmentNode(node) {
   return node instanceof CustomActionTextAttachmentNode
-}
-
-function dasherize(value) {
-  return value.replace(/([A-Z])/g, (_, char) => `-${char.toLowerCase()}`)
-}
-
-function isAutolinkableURL(string) {
-  return /^(?:[a-z0-9]+:\/\/|www\.)[^\s]+$/i.test(string)
-}
-
-function normalizeFilteredText(string) {
-  return string
-    .toLowerCase()
-    .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Remove diacritics
-}
-
-function filterMatchPosition(text, potentialMatch) {
-  const normalizedText = normalizeFilteredText(text);
-  const normalizedMatch = normalizeFilteredText(potentialMatch);
-
-  if (!normalizedMatch) return 0
-
-  const match = normalizedText.match(new RegExp(`(?<![\\p{L}\\p{N}])${escapeForRegExp(normalizedMatch)}`, "u"));
-  return match ? match.index : -1
-}
-
-function upcaseFirst(string) {
-  return string.charAt(0).toUpperCase() + string.slice(1)
-}
-
-function escapeForRegExp(string) {
-  return string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-}
-
-// Parses a value that may arrive as a boolean or as a string (e.g. from DOM
-// getAttribute) into a proper boolean. Ensures "false" doesn't evaluate as truthy.
-function parseBoolean(value) {
-  if (typeof value === "string") return value === "true"
-  return Boolean(value)
 }
 
 class LexxyExtension {
@@ -5958,7 +5994,7 @@ class Contents {
 
     this.editor.update(() => {
       const textNode = $createTextNode(url);
-      const linkNode = $createLinkNode(url);
+      const linkNode = $createLinkNode(normalizeUrl(url));
       linkNode.append(textNode);
 
       const selection = $getSelection();
@@ -5976,7 +6012,7 @@ class Contents {
 
     this.editor.update(() => {
       $toggleLink(null);
-      $toggleLink(url);
+      $toggleLink(normalizeUrl(url));
     });
   }
 
@@ -8072,6 +8108,28 @@ function $openLink(target) {
   }
 }
 
+// Turns URLs into links as you type. The transform fires when a separator
+// (space, newline, punctuation) follows the URL, so "ruby.evilmartians.com "
+// links on space. Bare hosts (no scheme) match only for curated TLDs and get
+// https:// guessed via normalizeUrl, so the visible text stays as typed while
+// the href gets a scheme.
+class AutolinkExtension extends LexxyExtension {
+  get enabled() {
+    return this.editorElement.supportsRichText
+  }
+
+  get lexicalExtension() {
+    return defineExtension({
+      name: "lexxy/autolink",
+      register: (editor) => registerAutoLink(editor, {
+        matchers: [ createLinkMatcherWithRegExp(AUTOLINK_URL_REGEXP, normalizeUrl) ],
+        changeHandlers: [],
+        excludeParents: []
+      })
+    })
+  }
+}
+
 class PreventLexicalTripleClickExtension extends LexxyExtension {
   get lexicalExtension() {
     return defineExtension({
@@ -8576,6 +8634,7 @@ class LexicalEditorElement extends HTMLElement {
       AttachmentsExtension,
       FormatEscapeExtension,
       LinkOpenerExtension,
+      AutolinkExtension,
       PreventLexicalTripleClickExtension,
       CustomAttachmentDragAndDropExtension
     ]

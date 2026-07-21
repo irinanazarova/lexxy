@@ -18,6 +18,7 @@ import { $createActionTextAttachmentUploadNode, ActionTextAttachmentUploadNode }
 import { $getNearestBlockElementAncestorOrThrow } from "@lexical/utils"
 import NodeInserter from "./contents/node_inserter"
 import PastedContentFormatter from "./contents/pasted_content_formatter"
+import { normalizeUrl } from "../helpers/string_helper"
 import { $consecutiveSiblingGroups, $expandSelectionToLineBreaksAndSplitAtEdges, $isShadowRoot, $splitSelectedParagraphsAtInnerLineBreaks } from "../helpers/lexical_helper"
 
 export default class Contents {
@@ -171,7 +172,7 @@ export default class Contents {
 
     this.editor.update(() => {
       const textNode = $createTextNode(url)
-      const linkNode = $createLinkNode(url)
+      const linkNode = $createLinkNode(normalizeUrl(url))
       linkNode.append(textNode)
 
       const selection = $getSelection()
@@ -189,7 +190,7 @@ export default class Contents {
 
     this.editor.update(() => {
       $toggleLink(null)
-      $toggleLink(url)
+      $toggleLink(normalizeUrl(url))
     })
   }
 

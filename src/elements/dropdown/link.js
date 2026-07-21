@@ -1,6 +1,7 @@
 import { LinkNode } from "@lexical/link"
 import { ToolbarDropdown } from "../toolbar_dropdown"
 import { registerEventListener } from "../../helpers/listener_helper"
+import { normalizeUrl } from "../../helpers/string_helper"
 
 export class LinkDropdown extends ToolbarDropdown {
   editorReady() {
@@ -39,6 +40,10 @@ export class LinkDropdown extends ToolbarDropdown {
   }
 
   #handleLink = () => {
+    // Guess a scheme for bare hosts ("ruby.evilmartians.com") so the native
+    // type="url" validity check passes and the link gets an https:// href.
+    if (this.input.value.trim()) this.input.value = normalizeUrl(this.input.value)
+
     if (!this.input.checkValidity()) {
       this.input.reportValidity()
       return
